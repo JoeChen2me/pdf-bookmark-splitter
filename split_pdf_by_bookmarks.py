@@ -3,107 +3,70 @@ import argparse
 from PyPDF2 import PdfReader, PdfWriter
 from collections import defaultdict
 
-def debug_print_outline(outline, level=0):
-    """Debug function to print outline structure"""
-    if isinstance(outline, list):
-        print("  " * level + "List of items:")
-        for item in outline:
-            debug_print_outline(item, level + 1)
-    elif isinstance(outline, dict):
-        print("  " * level + f"Dict item: {outline.get('/Title', 'No Title')}")
-        if '/First' in outline:
-            debug_print_outline(outline['/First'], level + 1)
-        if '/Next' in outline:
-            debug_print_outline(outline['/Next'], level)
-    else:
-        print("  " * level + f"Unknown type: {type(outline)}")
+def process_bookmark(bookmark, reader):
+    """Process a single bookmark and return its information"""
+    if isinstance(bookmark, dict):
+        if '/Page' in bookmark:
+            title = bookmark.get('/Title', '')
+            page_ref = bookmark.get('/Page', None)
+            if hasattr(page_ref, 'get_object'):
+                page_num = reader.get_page_number(page_ref.get_object())
+            else:
+                page_num = reader.get_page_number(page_ref)
+            return [(title, page_num, title.count('.'))]
+        return []
+    elif isinstance(bookmark, list):
+        results = []
+        for b in bookmark:
+            results.extend(process_bookmark(b, reader))
+        return results
+    return []
 
 def extract_bookmarks_with_pages(reader):
     """Extract all bookmarks with their page numbers and levels"""
-    def process_outline(outline, level=0):
+    def process_outline(outline):
         results = []
-        if outline is None:
-            return results
-
         if isinstance(outline, list):
             for item in outline:
-                results.extend(process_outline(item, level))
+                results.extend(process_outline(item))
         elif isinstance(outline, dict):
             title = outline.get('/Title', '')
-            print(f"Processing bookmark: {title}")  # Debug info
+            if '/Page' in outline:  # This is a page reference
+                page_ref = outline['/Page']
+                if hasattr(page_ref, 'get_object'):
+                    page_num = reader.get_page_number(page_ref.get_object())
+                else:
+                    page_num = reader.get_page_number(page_ref)
+                level = len(title.split('.')[0].strip().split())
+                results.append((title, page_num, level))
             
-            try:
-                if '/Page' in outline or '/D' in outline:
-                    # Try different ways to get the page number
-                    page_num = None
-                    if '/Page' in outline:
-                        page_ref = outline['/Page']
-                        if hasattr(reader, 'get_page_number'):
-                            try:
-                                page_num = reader.get_page_number(page_ref)
-                            except:
-                                # If direct method fails, try getting the object first
-                                if hasattr(page_ref, 'get_object'):
-                                    page_num = reader.get_page_number(page_ref.get_object())
-                    elif '/D' in outline:
-                        # Some PDFs use /D instead of /Page
-                        dest = outline['/D']
-                        if isinstance(dest, list) and len(dest) > 0:
-                            page_ref = dest[0]
-                            if hasattr(reader, 'get_page_number'):
-                                try:
-                                    page_num = reader.get_page_number(page_ref)
-                                except:
-                                    if hasattr(page_ref, 'get_object'):
-                                        page_num = reader.get_page_number(page_ref.get_object())
-
-                    if page_num is not None:
-                        # Determine level based on title format (e.g., "1.2.3")
-                        dots = title.split('.')
-                        level = len(dots) if len(dots) > 1 else 1
-                        results.append((title, page_num, level))
-                        print(f"Added bookmark: {title} (Page {page_num}, Level {level})")  # Debug info
-            except Exception as e:
-                print(f"Warning: Error processing bookmark '{title}': {str(e)}")
-            
-            # Process child bookmarks
+            # Process any children
             if '/First' in outline:
-                results.extend(process_outline(outline['/First'], level + 1))
-            if '/Next' in outline:
-                results.extend(process_outline(outline['/Next'], level))
+                child = outline['/First']
+                while child:
+                    results.extend(process_outline(child))
+                    child = child.get('/Next', None)
         
         return results
 
-    print("Starting bookmark extraction...")  # Debug info
     try:
         outline = reader.outline
-        print(f"Outline type: {type(outline)}")  # Debug info
-        debug_print_outline(outline)  # Print outline structure
-        
-        if outline is None:
-            print("No outline found in PDF")
+        if isinstance(outline, (list, dict)):
+            return process_outline(outline)
+        else:
+            print("Warning: Outline structure not recognized")
             return []
-        
-        results = process_outline(outline)
-        print(f"Extracted {len(results)} bookmarks")  # Debug info
-        return results
     except Exception as e:
-        print(f"Error in bookmark extraction: {str(e)}")
+        print(f"Warning: Error processing outline: {str(e)}")
         return []
 
 def organize_by_level(bookmarks, max_depth=None):
-    """
-    Organize bookmarks by their hierarchy level and merge deeper levels if max_depth is specified
-    """
+    """Organize bookmarks by their hierarchy level and merge deeper levels if max_depth is specified"""
     if not bookmarks:
         return []
 
-    print(f"Organizing bookmarks with max_depth: {max_depth}")  # Debug info
-    
     if not max_depth:
-        result = [(title, page_num) for title, page_num, _ in bookmarks]
-        print(f"Using all levels: {len(result)} bookmarks")  # Debug info
-        return result
+        return [(title, page_num) for title, page_num, _ in bookmarks]
 
     # Sort bookmarks by page number to ensure correct order
     bookmarks = sorted(bookmarks, key=lambda x: x[1])
@@ -113,36 +76,35 @@ def organize_by_level(bookmarks, max_depth=None):
     current_parent = None
     
     for title, page_num, level in bookmarks:
-        print(f"Processing: {title} (Level {level})")  # Debug info
         if level <= max_depth:
             current_parent = title
             sections[current_parent].append((page_num, page_num))
-            print(f"New section: {current_parent}")  # Debug info
         elif current_parent:
             if sections[current_parent]:
                 sections[current_parent][-1] = (sections[current_parent][-1][0], page_num)
-                print(f"Extended section: {current_parent}")  # Debug info
 
     # Convert to format needed for splitting
     result = []
     for title in sorted(sections.keys(), key=lambda x: sections[x][0][0]):
         result.append((title, sections[title][0][0]))
     
-    print(f"Organized into {len(result)} sections")  # Debug info
     return result
 
 def split_pdf_by_bookmarks(input_pdf_path, output_dir="split_pdfs", max_depth=None):
-    """
-    Split a PDF file according to its bookmarks
-    """
+    """Split a PDF file according to its bookmarks"""
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
+    
+    # Statistics counters
+    non_empty_count = 0
+    empty_count = 0
+    empty_chapters = []
     
     # Read the PDF
     print(f"Opening PDF: {input_pdf_path}")
     try:
         reader = PdfReader(input_pdf_path)
-        print(f"PDF loaded successfully: {len(reader.pages)} pages")  # Debug info
+        print(f"PDF loaded successfully: {len(reader.pages)} pages")
     except Exception as e:
         print(f"Error opening PDF: {str(e)}")
         return
@@ -166,6 +128,15 @@ def split_pdf_by_bookmarks(input_pdf_path, output_dir="split_pdfs", max_depth=No
         # Get end page (either next bookmark's page or last page)
         end_page = organized_bookmarks[i + 1][1] if i < len(organized_bookmarks) - 1 else len(reader.pages)
         
+        # Calculate number of pages
+        num_pages = end_page - start_page
+        
+        # Skip empty documents (0 pages)
+        if num_pages <= 0:
+            empty_count += 1
+            empty_chapters.append(title)
+            continue
+        
         # Create a new PDF
         writer = PdfWriter()
         
@@ -180,12 +151,23 @@ def split_pdf_by_bookmarks(input_pdf_path, output_dir="split_pdfs", max_depth=No
         output_path = os.path.join(output_dir, f"{safe_title}.pdf")
         
         # Save the split PDF
-        print(f"Creating: {safe_title}.pdf ({end_page - start_page} pages)")
+        print(f"Creating: {safe_title}.pdf ({num_pages} pages)")
         try:
             with open(output_path, 'wb') as output_file:
                 writer.write(output_file)
+            non_empty_count += 1
         except Exception as e:
             print(f"Error saving '{safe_title}.pdf': {str(e)}")
+
+    # Print statistics
+    print("\nProcessing Summary:")
+    print(f"Total sections processed: {len(organized_bookmarks)}")
+    print(f"Non-empty documents created: {non_empty_count}")
+    print(f"Empty sections skipped: {empty_count}")
+    if empty_count > 0:
+        print("\nSkipped sections (0 pages):")
+        for chapter in empty_chapters:
+            print(f"- {chapter}")
 
 def main():
     # Set up command line argument parser
@@ -212,7 +194,7 @@ def main():
     except Exception as e:
         print(f"Error processing PDF: {str(e)}")
         import traceback
-        traceback.print_exc()  # Print full stack trace for debugging
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()
