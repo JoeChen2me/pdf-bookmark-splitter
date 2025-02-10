@@ -1,6 +1,9 @@
 # PDF 书签分割工具
 
-一个基于 PDF 书签结构进行文件分割的 Python 工具。该工具能够根据 PDF 的书签将文档分割成多个文件，并且支持控制分割的层级深度。
+一个基于 PDF 书签结构进行文件分割的 Python 工具。该工具能够根据 PDF 的书签将文档分割成多个文件，并且支持控制分割的层级深度。  
+
+- [English](https://github.com/JoeChen2me/pdf-bookmark-splitter/blob/main/README.md)
+- 简体中文
 
 ## 功能特点
 

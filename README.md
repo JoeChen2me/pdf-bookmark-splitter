@@ -1,7 +1,10 @@
 # PDF Bookmark Splitter
 
-A Python utility to split PDF files based on their bookmark structure. This tool allows you to divide a PDF into multiple files according to its bookmarks, with the ability to control the splitting depth level.
+A Python utility to split PDF files based on their bookmark structure. This tool allows you to divide a PDF into multiple files according to its bookmarks, with the ability to control the splitting depth level.  
 
+- English 
+- [简体中文](https://github.com/JoeChen2me/pdf-bookmark-splitter/blob/main/readme_zh-CN.md)
+ 
 ## Features
 
 - Split PDF files based on bookmark structure
